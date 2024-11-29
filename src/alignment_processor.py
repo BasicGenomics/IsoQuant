@@ -213,7 +213,7 @@ class InMemoryAlignmentStorage(AbstractAlignmentStorage):
 
 
 class AlignmentCollector:
-    """ class for aggregating all alignmnet information
+    """ class for aggregating all alignment information
 
     Parameters
     ----------
@@ -368,6 +368,7 @@ class AlignmentCollector:
             if not alignment_info.read_exons:
                 logger.warning("Read %s has no aligned exons" % read_id)
                 continue
+           
 
             alignment_info.add_polya_info(self.polya_finder, self.polya_fixer)
             if self.params.cage:

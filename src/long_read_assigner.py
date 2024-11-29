@@ -435,7 +435,23 @@ class LongReadAssigner:
         if self.gene_info.empty():
             return ReadAssignment(read_id, ReadAssignmentType.intergenic,
                                   IsoformMatch(MatchClassification.intergenic))
-
+        
+        if not combined_read_profile.unique_imputation:
+            read_region = (read_split_exon_profile.read_features[0][0], read_split_exon_profile.read_features[-1][1])
+            gene_region = (self.gene_info.split_exon_profiles.features[0][0],
+                              self.gene_info.split_exon_profiles.features[-1][1])
+            # none of the blocks matched
+            if not overlaps(read_region, gene_region):
+                # logger.debug("EMPTY - noninformative")
+                assignment = ReadAssignment(read_id, ReadAssignmentType.noninformative, IsoformMatch(MatchClassification.intergenic))
+            elif all(el != 1 for el in read_split_exon_profile.gene_profile):
+                # logger.debug("EMPTY - intronic")
+                assignment = ReadAssignment(read_id, ReadAssignmentType.noninformative, IsoformMatch(MatchClassification.genic_intron))
+            else:
+                # logger.debug("EMPTY - genic")
+                assignment = ReadAssignment(read_id, ReadAssignmentType.noninformative, IsoformMatch(MatchClassification.genic))
+            return assignment
+        
         if all(el != 1 for el in read_split_exon_profile.read_profile) \
                 or all(el == 0 or el == -2 for el in read_split_exon_profile.gene_profile):
             read_region = (read_split_exon_profile.read_features[0][0], read_split_exon_profile.read_features[-1][1])

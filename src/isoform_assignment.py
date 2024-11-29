@@ -483,6 +483,7 @@ class BasicReadAssignment:
         self.polyA_found = read_assignment.polyA_found
         self.assignment_type = read_assignment.assignment_type
         self.gene_assignment_type = read_assignment.gene_assignment_type
+        self.unique_imputation = read_assignment.unique_imputation
         self.penalty_score = 0.0
         self.isoforms = []
         self.genes = []

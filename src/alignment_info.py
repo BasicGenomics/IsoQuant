@@ -19,7 +19,7 @@ class AlignmentInfo:
     def __init__(self, alignment):
         self.alignment = alignment
         # concat indels
-        self.read_exons, self.read_blocks, self.cigar_blocks = get_read_blocks(alignment.reference_start,
+        self.read_exons, self.del_blocks, self.read_blocks, self.cigar_blocks = get_read_blocks(alignment.reference_start,
                                                                                alignment.cigartuples)
         self.aligned_pairs = None
         self.aligned_pairs_start_index = None
@@ -32,9 +32,10 @@ class AlignmentInfo:
         self.exons_changed = False
         self.cage_hits = []
         self.combined_profile = None
+        self.unique_imputation = True
 
     def construct_profiles(self, profile_constructor):
-        self.combined_profile = profile_constructor.construct_profiles(self.read_exons, self.polya_info, self.cage_hits)
+        self.read_exons, self.unique_imputation, self.combined_profile = profile_constructor.construct_profiles(self.read_exons, self.del_blocks, self.polya_info, self.cage_hits)
 
     def set_aligned_pairs(self):
         self.aligned_pairs = self.alignment.get_aligned_pairs()

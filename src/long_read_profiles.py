@@ -8,9 +8,11 @@
 import logging
 from functools import partial
 from collections import defaultdict
+from itertools import combinations
 
 from .common import (
     contains,
+    contains_approx,
     equal_ranges,
     junctions_from_blocks,
     left_of,
@@ -42,7 +44,123 @@ class CombinedReadProfiles:
         self.alignment = alignment
         self.polya_info = polya_info
         self.cage_hits = cage_hits
-
+## This class is used to impute exon intervals when coverage information is missing in BaseCode data.
+class ExonImputation:
+    def __init__(self, known_features, gene_region,
+                 comparator = contains_approx,
+                 delta=0):
+        self.known_features = known_features
+        self.gene_region = gene_region
+        self.comparator = comparator
+        self.delta = delta
+    def overlaps(self, range1, range2):
+        return not (range1[1] < range2[0] or range1[0] > range2[1])
+    def invert_introns(self, matches):
+        new_end = matches[0][0] - 1
+        new_start = matches[-1][1] + 1
+        tmp_new_blocks = []
+        for i in range(len(matches)-1):
+            tmp_new_blocks.append((matches[i][1]+1, matches[i+1][0]-1))
+        return new_end, tmp_new_blocks, new_start
+    def prune_exons_outside_gene_model(self,sorted_blocks, sorted_deleted_blocks):
+        prune_left = 0
+        prune_right = 0
+        n_blocks = len(sorted_blocks)
+        n_blocks_deleted = len(sorted_deleted_blocks)
+        for i in range(n_blocks):
+            current_block_exon = sorted_blocks[i]
+            if not overlaps(current_block_exon, self.gene_region):
+                if current_block_exon[1] == sorted_deleted_blocks[i][0] - 1:
+                    prune_left += 1
+                else:
+                    break
+            else:
+                break
+        for i in range(1,n_blocks):
+            current_block_exon = sorted_blocks[-i]
+            if not self.overlaps(current_block_exon, self.gene_region):
+                if current_block_exon[0] == sorted_deleted_blocks[-i][1] + 1:
+                    prune_right += 1
+                else:
+                    break
+            else:
+                break
+        return sorted_blocks[prune_left:(n_blocks-prune_right)], sorted_deleted_blocks[prune_left:(n_blocks_deleted-prune_right)]
+    def impute_exon_structure(self, sorted_blocks, sorted_deleted_blocks):
+        ### TODO: Validate and test function
+        sorted_blocks, sorted_deleted_blocks = self.prune_exons_outside_gene_model(sorted_blocks, sorted_deleted_blocks)
+        if not sorted_deleted_blocks:
+            return sorted_blocks
+        new_sorted_blocks = []
+        unique_imputation = True
+        exon_pos = 0
+        deletion_pos = 0
+        new_start = None
+        start = -1
+        while exon_pos < len(sorted_blocks) and deletion_pos < len(sorted_deleted_blocks):
+            # print('Exon pos: ', exon_pos)
+            # print('Deletion pos: ', deletion_pos)
+            # print(start)
+            current_block = sorted_blocks[exon_pos]
+            if new_start == -1 or start == -1:
+                # print('Changing start to', current_block[0])
+                start = current_block[0]
+            deleted_block = sorted_deleted_blocks[deletion_pos]
+            if current_block[0] < deleted_block[0] or (deletion_pos + 1) == len(sorted_deleted_blocks):
+                # The current block is before the next deleted block or there are no more deleted blocks
+                if (sorted_blocks[exon_pos][1] + 1) == sorted_deleted_blocks[deletion_pos][0]:
+                    # The exon block is followed by a deletion
+                    deleted_block = sorted_deleted_blocks[deletion_pos]
+                    new_end, tmp_new_blocks, new_start, unique_imputation = self.find_features_in_block(deleted_block, current_block)
+                    # print(new_end, tmp_new_blocks, new_start, unique_imputation)
+                    if new_start is not None:
+                        # print('Adding block from deletion: ', (start, new_end))
+                        new_sorted_blocks.append((start, new_end))
+                        new_sorted_blocks.extend(tmp_new_blocks)
+                        start = new_start
+                else:
+                    # The exon block is followed by a refskip or is the last block
+                    end = current_block[1]
+                    # print('Adding block from refskip or last block: ', (start, end))
+                    new_sorted_blocks.append((start, end))
+                    new_start = -1
+                exon_pos += 1
+            else:
+                # The current block is after the next deleted block
+                deletion_pos += 1
+        return new_sorted_blocks, unique_imputation
+    def find_features_in_block(self, deleted_block, current_block):
+        # print('Deleted block: ', deleted_block)
+        unique_imputation = True
+        matches = 0
+        match_list = []
+        for gene_pos in range(len(self.known_features)):
+            isoform_feature = self.known_features[gene_pos]
+            # print('Intron: ', isoform_feature)
+            if self.comparator(deleted_block, isoform_feature):
+                # print('Match: ', isoform_feature)
+                matches += 1
+                match_list.append(isoform_feature)
+        if matches == 0:
+            # No intron in deleted block
+            new_end = None
+            tmp_new_blocks = []
+            new_start = None
+        elif matches == 1:
+            # One intron found in the deleted block
+            new_end = match_list[0][0] - 1
+            tmp_new_blocks = []
+            new_start = match_list[0][1] + 1
+        else:
+            # Check if there is any overlap between contained introns
+            if any(overlaps(intron1, intron2) for intron1, intron2 in combinations(match_list, 2)):
+                new_end = min([t[0] - 1 for t in match_list])
+                tmp_new_blocks = []
+                new_start = max([t[1] + 1 for t in match_list])
+                unique_imputation = False
+            else:
+                new_end, tmp_new_blocks, new_start = self.invert_introns(match_list)
+        return new_end, tmp_new_blocks, new_start, unique_imputation
 
 # The following 2 classes are very similar, but lets keep them separately for now
 # accepts sorted gapless alignment blocks
@@ -57,6 +175,8 @@ class OverlappingFeaturesProfileConstructor:
         self.comparator = comparator
         self.absence_condition = absence_condition
         self.delta = delta
+    
+    
 
     def construct_intron_profile(self, sorted_blocks, polya_position=-1, polyt_position=-1):
         mapped_region = (sorted_blocks[0][0], sorted_blocks[-1][1])
@@ -248,8 +368,11 @@ class CombinedProfileConstructor:
     def __init__(self, gene_info, params):
         self.gene_info = gene_info
         self.params = params
-
+        self.unique_imputation = True
         gene_region = (gene_info.start, gene_info.end)
+
+        self.exon_imputation = ExonImputation(self.gene_info.intron_profiles.feature, gene_region, comparator=contains, delta=self.params.delta)
+
         self.intron_profile_constructor = \
             OverlappingFeaturesProfileConstructor(self.gene_info.intron_profiles.features, gene_region,
                                                   comparator=partial(equal_ranges, delta=self.params.delta),
@@ -265,17 +388,19 @@ class CombinedProfileConstructor:
                                                                         delta=self.params.minimal_exon_overlap),
                                                      delta=self.params.delta)
 
-    def construct_profiles(self, sorted_blocks, polya_info, cage_hits):
-        intron_profile = self.intron_profile_constructor.construct_intron_profile(sorted_blocks,
+    def construct_profiles(self, sorted_blocks, sorted_deleted_blocks, polya_info, cage_hits):
+        imputed_sorted_blocks, unique_imputation = self.exon_imputation(sorted_blocks, sorted_deleted_blocks)
+        self.unique_imputation = unique_imputation
+        intron_profile = self.intron_profile_constructor.construct_intron_profile(imputed_sorted_blocks,
                                                                                   polya_info.external_polya_pos,
                                                                                   polya_info.external_polyt_pos)
         exon_profile = None
         if self.params.count_exons:
-            exon_profile = self.exon_profile_constructor.construct_exon_profile(sorted_blocks,
+            exon_profile = self.exon_profile_constructor.construct_exon_profile(imputed_sorted_blocks,
                                                                                 polya_info.external_polya_pos,
                                                                                 polya_info.external_polyt_pos)
-        split_exon_profile = self.split_exon_profile_constructor.construct_profile(sorted_blocks,
+        split_exon_profile = self.split_exon_profile_constructor.construct_profile(imputed_sorted_blocks,
                                                                                    polya_info.external_polya_pos,
                                                                                    polya_info.external_polyt_pos)
-        return CombinedReadProfiles(intron_profile, exon_profile, split_exon_profile,
+        return imputed_sorted_blocks, unique_imputation, CombinedReadProfiles(intron_profile, exon_profile, split_exon_profile,
                                     polya_info=polya_info, cage_hits=cage_hits)
