@@ -454,6 +454,9 @@ class LongReadAssigner:
         
         if all(el != 1 for el in read_split_exon_profile.read_profile) \
                 or all(el == 0 or el == -2 for el in read_split_exon_profile.gene_profile):
+            if not read_split_exon_profile.read_profile:
+                assignment = ReadAssignment(read_id, ReadAssignmentType.noninformative, IsoformMatch(MatchClassification.genic))
+                return assignment
             read_region = (read_split_exon_profile.read_features[0][0], read_split_exon_profile.read_features[-1][1])
             gene_region = (self.gene_info.split_exon_profiles.features[0][0],
                               self.gene_info.split_exon_profiles.features[-1][1])

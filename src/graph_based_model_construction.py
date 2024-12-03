@@ -202,7 +202,7 @@ class GraphBasedModelConstructor:
             else:
                 polya_info = PolyAInfo(model.exon_blocks[-1][1], -1, -1, -1)
 
-            combined_profile = self.profile_constructor.construct_profiles(model.exon_blocks, polya_info, [])
+            imputed_exon_blocks, unique_imputation, combined_profile = self.profile_constructor.construct_profiles(model.exon_blocks, polya_info, [])
             assignment = self.assigner.assign_to_isoform(model.transcript_id, combined_profile)
             if assignment is None:
                 continue
@@ -370,7 +370,7 @@ class GraphBasedModelConstructor:
                     polya_info = PolyAInfo(m.intron_path[-1][1], -1, -1, -1)
                 else:
                     polya_info = PolyAInfo(-1, -1, -1, -1)
-                combined_profile = profile_constructor.construct_profiles(m.exon_blocks, polya_info, [])
+                imputed_exon_blocks, unique_imputation, combined_profile = profile_constructor.construct_profiles(m.exon_blocks, [], polya_info, [])
                 assignment = assigner.assign_to_isoform(m.transcript_id, combined_profile)
 
                 if is_matching_assignment(assignment):
@@ -419,7 +419,7 @@ class GraphBasedModelConstructor:
                 polya_info = PolyAInfo(intron_path[-1][1], -1, -1, -1)
             else:
                 polya_info = PolyAInfo(-1, -1, -1, -1)
-            combined_profile = self.profile_constructor.construct_profiles(novel_exons, polya_info, [])
+            imputed_novel_exons, unique_imputation, combined_profile = self.profile_constructor.construct_profiles(novel_exons, [], polya_info, [])
             assignment = self.assigner.assign_to_isoform(new_transcript_id, combined_profile)
             # check that no serious contradiction occurs
             # logger.debug("uuu Checking novel transcript %s: %s; assignment type %s" %
@@ -751,7 +751,7 @@ class GraphBasedModelConstructor:
 
             read_exons = assignment.corrected_exons
             # logger.debug("# Checking read %s: %s" % (assignment.read_id, str(read_exons)))
-            model_combined_profile = profile_constructor.construct_profiles(read_exons, assignment.polya_info, [])
+            imputed_read_exons, unique_imputation, model_combined_profile = profile_constructor.construct_profiles(read_exons, [], assignment.polya_info, [])
             model_assignment = assigner.assign_to_isoform(assignment.read_id, model_combined_profile)
             model_assignment.read_group = assignment.read_group
             # check that no serious contradiction occurs

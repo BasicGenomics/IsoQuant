@@ -7,7 +7,7 @@
 
 import logging
 
-from .common import get_read_blocks
+from .common import get_read_blocks, overlaps
 from .polya_verification import shift_polya, shift_polyt
 
 logger = logging.getLogger('IsoQuant')
@@ -36,6 +36,7 @@ class AlignmentInfo:
 
     def construct_profiles(self, profile_constructor):
         self.read_exons, self.unique_imputation, self.combined_profile = profile_constructor.construct_profiles(self.read_exons, self.del_blocks, self.polya_info, self.cage_hits)
+        self.del_blocks = []
 
     def set_aligned_pairs(self):
         self.aligned_pairs = self.alignment.get_aligned_pairs()
@@ -145,3 +146,8 @@ class AlignmentInfo:
         if self.exons_changed:
             self.read_start = self.read_exons[0][0]
             self.read_end = self.read_exons[-1][1]
+            new_deleted_blocks = []
+            for (start, end) in self.del_blocks:
+                if overlaps((start,end), (self.read_start, self.read_end)):
+                    new_deleted_blocks.append((start, end))
+            self.del_blocks = new_deleted_blocks

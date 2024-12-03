@@ -364,7 +364,6 @@ class AlignmentCollector:
             read_id = alignment.query_name
             logger.debug("=== Processing read " + read_id + " ===")
             alignment_info = AlignmentInfo(alignment)
-
             if not alignment_info.read_exons:
                 logger.warning("Read %s has no aligned exons" % read_id)
                 continue
@@ -374,6 +373,11 @@ class AlignmentCollector:
             if self.params.cage:
                 alignment_info.add_cage_info(self.cage_finder)
             alignment_info.construct_profiles(profile_constructor)
+
+            if not alignment_info.read_exons:
+                logger.warning("Read %s has no aligned exons" % read_id)
+                logger.warning("Read has gene info {} and {}".format(gene_info.start, gene_info.end) )
+                continue
             read_assignment = assigner.assign_to_isoform(read_id, alignment_info.combined_profile)
 
             if (not read_assignment.assignment_type in [ReadAssignmentType.unique,

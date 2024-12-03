@@ -37,13 +37,14 @@ class MappedReadProfile:
 
 class CombinedReadProfiles:
     def __init__(self, read_intron_profile, read_exon_profile, read_split_exon_profile,
-                 polya_info=None, cage_hits=-1, alignment=None):
+                 polya_info=None, cage_hits=-1, unique_imputation=True, alignment=None):
         self.read_intron_profile = read_intron_profile
         self.read_exon_profile = read_exon_profile
         self.read_split_exon_profile = read_split_exon_profile
         self.alignment = alignment
         self.polya_info = polya_info
         self.cage_hits = cage_hits
+        self.unique_imputation = unique_imputation
 ## This class is used to impute exon intervals when coverage information is missing in BaseCode data.
 class ExonImputation:
     def __init__(self, known_features, gene_region,
@@ -67,7 +68,9 @@ class ExonImputation:
         prune_right = 0
         n_blocks = len(sorted_blocks)
         n_blocks_deleted = len(sorted_deleted_blocks)
-        for i in range(n_blocks):
+        for i in range(n_blocks-1):
+            if i >= n_blocks_deleted:
+                break
             current_block_exon = sorted_blocks[i]
             if not overlaps(current_block_exon, self.gene_region):
                 if current_block_exon[1] == sorted_deleted_blocks[i][0] - 1:
@@ -78,6 +81,8 @@ class ExonImputation:
                 break
         for i in range(1,n_blocks):
             current_block_exon = sorted_blocks[-i]
+            if i >= n_blocks_deleted:
+                break
             if not self.overlaps(current_block_exon, self.gene_region):
                 if current_block_exon[0] == sorted_deleted_blocks[-i][1] + 1:
                     prune_right += 1
@@ -88,9 +93,12 @@ class ExonImputation:
         return sorted_blocks[prune_left:(n_blocks-prune_right)], sorted_deleted_blocks[prune_left:(n_blocks_deleted-prune_right)]
     def impute_exon_structure(self, sorted_blocks, sorted_deleted_blocks):
         ### TODO: Validate and test function
-        sorted_blocks, sorted_deleted_blocks = self.prune_exons_outside_gene_model(sorted_blocks, sorted_deleted_blocks)
+        if overlaps((sorted_blocks[0][0], sorted_blocks[-1][1]), self.gene_region):
+            sorted_blocks, sorted_deleted_blocks = self.prune_exons_outside_gene_model(sorted_blocks, sorted_deleted_blocks)
+        #print(sorted_blocks)
         if not sorted_deleted_blocks:
-            return sorted_blocks
+            #print('no deletions')
+            return sorted_blocks, True
         new_sorted_blocks = []
         unique_imputation = True
         exon_pos = 0
@@ -179,11 +187,15 @@ class OverlappingFeaturesProfileConstructor:
     
 
     def construct_intron_profile(self, sorted_blocks, polya_position=-1, polyt_position=-1):
+        if not sorted_blocks:
+            return  MappedReadProfile([], [], defaultdict(list), (0, 0))
         mapped_region = (sorted_blocks[0][0], sorted_blocks[-1][1])
         read_introns = junctions_from_blocks(sorted_blocks)
         return self.construct_profile_for_features(read_introns, mapped_region, polya_position, polyt_position)
 
     def construct_exon_profile(self, sorted_blocks, polya_position=-1, polyt_position=-1):
+        if not sorted_blocks:
+            return  MappedReadProfile([], [], defaultdict(list), (0, 0))
         mapped_region = (sorted_blocks[0][1] + self.delta, sorted_blocks[-1][0] - self.delta)
         return self.construct_profile_for_features(sorted_blocks, mapped_region, polya_position, polyt_position)
 
@@ -312,6 +324,8 @@ class NonOverlappingFeaturesProfileConstructor:
         self.delta = delta
 
     def construct_profile(self, sorted_blocks, polya_position=-1, polyt_position=-1):
+        if not sorted_blocks:
+            return  MappedReadProfile([], [], defaultdict(list), (0, 0))
         exon_profile = [0] * (len(self.known_exons))
         read_profile = [0] * (len(sorted_blocks))
         read_exons = sorted_blocks
@@ -368,10 +382,9 @@ class CombinedProfileConstructor:
     def __init__(self, gene_info, params):
         self.gene_info = gene_info
         self.params = params
-        self.unique_imputation = True
         gene_region = (gene_info.start, gene_info.end)
 
-        self.exon_imputation = ExonImputation(self.gene_info.intron_profiles.feature, gene_region, comparator=contains, delta=self.params.delta)
+        self.exon_imputation = ExonImputation(self.gene_info.intron_profiles.features, gene_region, comparator=contains, delta=self.params.delta)
 
         self.intron_profile_constructor = \
             OverlappingFeaturesProfileConstructor(self.gene_info.intron_profiles.features, gene_region,
@@ -389,8 +402,12 @@ class CombinedProfileConstructor:
                                                      delta=self.params.delta)
 
     def construct_profiles(self, sorted_blocks, sorted_deleted_blocks, polya_info, cage_hits):
-        imputed_sorted_blocks, unique_imputation = self.exon_imputation(sorted_blocks, sorted_deleted_blocks)
-        self.unique_imputation = unique_imputation
+        #print('Before: ', sorted_blocks, sorted_deleted_blocks)
+        #print(self.exon_imputation.gene_region)
+        imputed_sorted_blocks, unique_imputation = self.exon_imputation.impute_exon_structure(sorted_blocks, sorted_deleted_blocks)
+        if not imputed_sorted_blocks:
+            print("Before: ", sorted_blocks, sorted_deleted_blocks, "After: ", imputed_sorted_blocks, "Gene Region: {}-{}".format(self.exon_imputation.gene_region[0], self.exon_imputation.gene_region[1]) )
+        #print('After: ', imputed_sorted_blocks)
         intron_profile = self.intron_profile_constructor.construct_intron_profile(imputed_sorted_blocks,
                                                                                   polya_info.external_polya_pos,
                                                                                   polya_info.external_polyt_pos)
@@ -403,4 +420,4 @@ class CombinedProfileConstructor:
                                                                                    polya_info.external_polya_pos,
                                                                                    polya_info.external_polyt_pos)
         return imputed_sorted_blocks, unique_imputation, CombinedReadProfiles(intron_profile, exon_profile, split_exon_profile,
-                                    polya_info=polya_info, cage_hits=cage_hits)
+                                    polya_info=polya_info, cage_hits=cage_hits, unique_imputation=unique_imputation)

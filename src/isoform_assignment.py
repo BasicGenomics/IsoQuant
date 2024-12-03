@@ -566,8 +566,12 @@ class BasicReadAssignment:
         read_assignment.read_id = read_string(infile)
         read_assignment.genomic_region = (read_int(infile), read_int(infile))
         exons = read_list_of_pairs(infile, read_int)
-        read_assignment.start = exons[0][0]
-        read_assignment.end = exons[-1][1]
+        if exons:
+            read_assignment.start = exons[0][0]
+            read_assignment.end = exons[-1][1]
+        else:
+            read_assignment.start = 0
+            read_assignment.end = 0
         read_list_of_pairs(infile, read_int)
         bool_arr = read_bool_array(infile, 3)
         read_assignment.multimapper = bool_arr[0]
