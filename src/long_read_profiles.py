@@ -20,7 +20,8 @@ from .common import (
     overlaps_at_least,
     overlaps_at_least_when_overlap,
     interval_bin_search,
-    interval_bin_search_rev
+    interval_bin_search_rev,
+    interval_len
 )
 
 logger = logging.getLogger('IsoQuant')
@@ -118,9 +119,8 @@ class ExonImputation:
             deleted_block = sorted_deleted_blocks[deletion_pos]
             if current_block[0] < deleted_block[0] or (deletion_pos + 1) == len(sorted_deleted_blocks):
                 # The current block is before the next deleted block or there are no more deleted blocks
-                if (sorted_blocks[exon_pos][1] + 1) == sorted_deleted_blocks[deletion_pos][0]:
+                if (current_block[1] + 1) == deleted_block[0]:
                     # The exon block is followed by a deletion
-                    deleted_block = sorted_deleted_blocks[deletion_pos]
                     new_end, tmp_new_blocks, new_start, unique_imputation = self.find_features_in_block(deleted_block, current_block)
                     if not unique_imputation:
                         unique_imputation_final = False
@@ -130,6 +130,11 @@ class ExonImputation:
                         new_sorted_blocks.append((start, new_end))
                         new_sorted_blocks.extend(tmp_new_blocks)
                         start = new_start
+                        ref_added = sum([interval_len(block) for block in tmp_new_blocks])
+                    else: 
+                        ref_added = interval_len(deleted_block)
+                    if ref_added > 550:
+                        unique_imputation_final = False
                 else:
                     # The exon block is followed by a refskip or is the last block
                     end = current_block[1]
