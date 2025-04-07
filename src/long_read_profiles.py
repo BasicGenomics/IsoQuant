@@ -121,7 +121,9 @@ class ExonImputation:
                 if (sorted_blocks[exon_pos][1] + 1) == sorted_deleted_blocks[deletion_pos][0]:
                     # The exon block is followed by a deletion
                     deleted_block = sorted_deleted_blocks[deletion_pos]
-                    new_end, tmp_new_blocks, new_start, unique_imputation_final = self.find_features_in_block(deleted_block, current_block)
+                    new_end, tmp_new_blocks, new_start, unique_imputation = self.find_features_in_block(deleted_block, current_block)
+                    if not unique_imputation:
+                        unique_imputation_final = False
                     # print(new_end, tmp_new_blocks, new_start, unique_imputation)
                     if new_start is not None:
                         # print('Adding block from deletion: ', (start, new_end))
