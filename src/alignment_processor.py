@@ -374,6 +374,9 @@ class AlignmentCollector:
                 alignment_info.add_cage_info(self.cage_finder)
             alignment_info.construct_profiles(profile_constructor)
 
+            if not alignment_info.unique_imputation:
+                continue
+
             if not alignment_info.read_exons:
                 logger.warning("Read %s has no aligned exons" % read_id)
                 logger.warning("Read has gene info {} and {}".format(gene_info.start, gene_info.end) )
