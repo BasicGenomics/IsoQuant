@@ -49,10 +49,12 @@ class CombinedReadProfiles:
 class ExonImputation:
     def __init__(self, known_features, gene_region,
                  comparator = contains_approx,
+                 overlap = overlaps,
                  delta=0):
         self.known_features = known_features
         self.gene_region = gene_region
         self.comparator = comparator
+        self.overlap = overlap
         self.delta = delta
     def overlaps(self, range1, range2):
         return not (range1[1] < range2[0] or range1[0] > range2[1])
@@ -150,8 +152,13 @@ class ExonImputation:
                 matches += 1
                 match_list.append(isoform_feature)
         if matches == 0:
+            for gene_pos in range(len(self.known_features)):
+                isoform_feature = self.known_features[gene_pos]
+            # print('Intron: ', isoform_feature)
+                if self.overlap(deleted_block, isoform_feature):
+                    unique_imputation = False
             # No intron in deleted block
-            new_end = None
+            new_end = None 
             tmp_new_blocks = []
             new_start = None
         elif matches == 1:
