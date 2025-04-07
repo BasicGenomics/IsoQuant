@@ -157,7 +157,7 @@ class ExonImputation:
             for gene_pos in range(len(self.known_features)):
                 isoform_feature = self.known_features[gene_pos]
             # print('Intron: ', isoform_feature)
-                if self.overlap(deleted_block, isoform_feature):
+                if self.overlap(deleted_block, isoform_feature) and not self.comparator(isoform_feature, deleted_block):
                     unique_imputation = False
             # No intron in deleted block
             new_end = None 
