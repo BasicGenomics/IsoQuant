@@ -334,7 +334,7 @@ class AlignmentCollector:
             read_assignment.cage_found = len(alignment_info.cage_hits) > 0
             read_assignment.genomic_region = region
             read_assignment.exons = alignment_info.read_exons
-            read_assignment.corrected_exons = corrector.correct_read(alignment_info)
+            read_assignment.corrected_exons = read_assignment.exons
             read_assignment.corrected_introns = junctions_from_blocks(read_assignment.corrected_exons)
 
             read_assignment.read_group = self.read_groupper.get_group_id(alignment, self.bam_merger.bam_pairs[bam_index][1])
@@ -379,6 +379,7 @@ class AlignmentCollector:
                 logger.warning("Read has gene info {} and {}".format(gene_info.start, gene_info.end) )
                 continue
             read_assignment = assigner.assign_to_isoform(read_id, alignment_info.combined_profile)
+            
 
             if (not read_assignment.assignment_type in [ReadAssignmentType.unique,
                                                         ReadAssignmentType.unique_minor_difference,
@@ -396,8 +397,7 @@ class AlignmentCollector:
             read_assignment.cage_found = len(alignment_info.cage_hits) > 0
             read_assignment.genomic_region = region
             read_assignment.exons = alignment_info.read_exons
-            read_assignment.corrected_exons = exon_corrector.correct_assigned_read(alignment_info,
-                                                                                   read_assignment)
+            read_assignment.corrected_exons = read_assignment.exons
             read_assignment.corrected_introns = junctions_from_blocks(read_assignment.corrected_exons)
 
             read_assignment.read_group = self.read_groupper.get_group_id(alignment, self.bam_merger.bam_pairs[bam_index][1])
@@ -406,7 +406,7 @@ class AlignmentCollector:
             AlignmentCollector.check_antisense(read_assignment)
             AlignmentCollector.import_bam_tags(alignment, read_assignment, self.params.bam_tags)
 
-            read_assignment.chr_id = gene_info.chr_id
+            read_assignment.chr_id = gene_info.chr_id 
             read_assignment.multimapper = alignment.is_secondary
             read_assignment.mapping_quality = alignment.mapping_quality
 
