@@ -136,3 +136,31 @@ All required Python libraries can be installed via:
 
 * If multiple files are provided, IsoQuant will create a single output annotation and a single set of gene/transcript expression tables.
 
+## BaseCode mode
+
+This build adds a `--basecode` flag for **reconstructed-molecule data** (e.g. BASIC Genomics),
+where paired short reads are stitched into a single molecule and the unsequenced inner-mate gap is
+represented as a CIGAR `D` (deletion) block rather than a real deletion or an intron.
+
+When `--basecode` is set, IsoQuant:
+
+1. **Imputes exon structure across deletion blocks.** Each `D`-gap is matched against the annotated
+   introns: a gap containing an annotated intron is split into exon/intron structure; a gap with no
+   matching intron is filled in as contiguous exon (up to `--basecode_max_gap` bp). Gaps larger than
+   that, or that match introns ambiguously, mark the read as non-unique and it is skipped.
+2. **Disables exon correction.** The imputed exon boundaries are treated as authoritative, so the
+   splice-site corrector is bypassed for these reads.
+
+Without `--basecode`, behavior is identical to upstream IsoQuant 3.13.
+
+        isoquant --reference /PATH/TO/reference_genome.fasta \
+        --genedb /PATH/TO/gene_annotation.gtf \
+        --bam /PATH/TO/stitched.molecules.sorted.bam \
+        --data_type pacbio_ccs --complete_genedb --basecode -o OUTPUT_FOLDER
+
+Options:
+
+* `--basecode` — enable BaseCode mode (default: off).
+* `--basecode_max_gap N` — maximum unsequenced exonic gap (bp) to impute as contiguous exon when no
+  annotated intron matches (default: 550). Set this from your library's fragment-size distribution.
+
