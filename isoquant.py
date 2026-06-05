@@ -236,6 +236,14 @@ def parse_args(cmd_args=None, namespace=None):
     add_additional_option_to_group(algo_args_group, "--use_replicas", type=bool_str, default=True,
                                    help="require novel transcripts to be confirmed by multiple files "
                                         "when file_name grouping is used (default: true)")
+    add_option_to_group(algo_args_group, "--basecode", action='store_true', default=False,
+                        help="enable BaseCode mode: impute exon structure across unsequenced inner-mate gaps "
+                             "(CIGAR D-blocks) and disable exon correction; for reconstructed-molecule data "
+                             "(e.g. BASIC Genomics). Without this flag behavior is identical to upstream.")
+    add_additional_option_to_group(algo_args_group, "--basecode_max_gap", type=int, default=550,
+                                   help="BaseCode mode: maximum unsequenced exonic gap (bp) to impute as "
+                                        "contiguous exon when no annotated intron matches; larger gaps cause "
+                                        "the molecule to be skipped (default: 550)")
 
 
     # PIPELINE STEPS
