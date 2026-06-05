@@ -243,7 +243,7 @@ def contains_well_inside(bigger_range, smaller_range, delta=1):
     return bigger_range[1] >= smaller_range[1]+delta and bigger_range[0] <= smaller_range[0]-delta
 
 
-def contains_approx(bigger_range, smaller_range, delta = 5):
+def contains_approx(bigger_range, smaller_range, delta = 1):
     return bigger_range[1] + delta >= smaller_range[1] and bigger_range[0] - delta <= smaller_range[0]
 
 
@@ -549,7 +549,7 @@ def concat_gapless_blocks(blocks, cigar_tuples):
     return resulting_blocks
 
 
-def get_read_blocks(ref_start, cigar_tuples):
+def get_read_blocks(ref_start, cigar_tuples, split_on_deletion=False):
     read_pos = 0
     ref_pos = ref_start + 1
     cigar_index = 0
@@ -558,6 +558,7 @@ def get_read_blocks(ref_start, cigar_tuples):
     current_cigar_block_start = None
     has_match = False
     ref_blocks = []
+    del_blocks = []
     cigar_blocks = []
     read_blocks = []
 
@@ -586,6 +587,19 @@ def get_read_blocks(ref_start, cigar_tuples):
         elif cigar_event == CigarEvent.insertion:
             read_pos += event_len
         elif cigar_event == CigarEvent.deletion:
+            # BaseCode mode (split_on_deletion=True): treat each deletion as a block boundary and
+            # record the gap as a del_block, so exon imputation can later decide intron vs. unsequenced
+            # exon. Default (upstream) behavior absorbs the deletion into the current block.
+            if split_on_deletion and current_ref_block_start:
+                if has_match:
+                    ref_blocks.append((current_ref_block_start, ref_pos - 1))
+                    del_blocks.append((ref_pos, ref_pos + event_len - 1))
+                    read_blocks.append((current_read_block_start, read_pos - 1))
+                    cigar_blocks.append((current_cigar_block_start, cigar_index - 1))
+                has_match = False
+                current_ref_block_start = None
+                current_read_block_start = None
+                current_cigar_block_start = None
             ref_pos += event_len
         elif cigar_event == CigarEvent.skipped:
             if current_ref_block_start:
@@ -617,7 +631,7 @@ def get_read_blocks(ref_start, cigar_tuples):
         read_blocks.append((current_read_block_start, read_pos - 1))
         cigar_blocks.append((current_cigar_block_start, cigar_index - 1))
 
-    return ref_blocks, read_blocks, cigar_blocks
+    return ref_blocks, del_blocks, read_blocks, cigar_blocks
 
 
 def correct_bam_coords(blocks):

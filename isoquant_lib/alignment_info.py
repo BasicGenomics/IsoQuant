@@ -7,7 +7,7 @@
 
 import logging
 
-from .common import get_read_blocks
+from .common import get_read_blocks, overlaps
 from .polya_finder import PolyAInfo
 from .polya_verification import shift_polya, shift_polyt
 
@@ -17,11 +17,14 @@ logger = logging.getLogger('IsoQuant')
 class AlignmentInfo:
     REGION_TO_CHECK_LEN = 12
 
-    def __init__(self, alignment):
+    def __init__(self, alignment, params=None):
         self.alignment = alignment
-        # concat indels
-        self.read_exons, self.read_blocks, self.cigar_blocks = get_read_blocks(alignment.reference_start,
-                                                                               alignment.cigartuples)
+        # BaseCode mode splits read blocks on CIGAR deletions and records the gaps (del_blocks) for
+        # exon imputation; otherwise behaves like upstream (deletions absorbed, del_blocks empty).
+        split_on_deletion = bool(params is not None and getattr(params, 'basecode', False))
+        self.read_exons, self.del_blocks, self.read_blocks, self.cigar_blocks = \
+            get_read_blocks(alignment.reference_start, alignment.cigartuples, split_on_deletion=split_on_deletion)
+        self.unique_imputation = True
         self.aligned_pairs = None
         self.aligned_pairs_start_index = None
         self.aligned_pairs_end_index = None
@@ -35,7 +38,10 @@ class AlignmentInfo:
         self.combined_profile = None
 
     def construct_profiles(self, profile_constructor):
-        self.combined_profile = profile_constructor.construct_profiles(self.read_exons, self.polya_info, self.cage_hits)
+        # BaseCode mode: imputation may rewrite read_exons and set unique_imputation; del_blocks consumed here.
+        self.read_exons, self.unique_imputation, self.combined_profile = \
+            profile_constructor.construct_profiles(self.read_exons, self.del_blocks, self.polya_info, self.cage_hits)
+        self.del_blocks = []
 
     def set_aligned_pairs(self):
         self.aligned_pairs = self.alignment.get_aligned_pairs()
@@ -145,3 +151,9 @@ class AlignmentInfo:
         if self.exons_changed:
             self.read_start = self.read_exons[0][0]
             self.read_end = self.read_exons[-1][1]
+            # BaseCode mode: drop deletion blocks that fall outside the trimmed read region
+            new_deleted_blocks = []
+            for (start, end) in self.del_blocks:
+                if overlaps((start, end), (self.read_start, self.read_end)):
+                    new_deleted_blocks.append((start, end))
+            self.del_blocks = new_deleted_blocks

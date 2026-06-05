@@ -8,10 +8,12 @@
 import logging
 from functools import partial
 from collections import defaultdict
+from itertools import combinations
 
 from .common import (
     contains,
     equal_ranges,
+    interval_len,
     junctions_from_blocks,
     left_of,
     overlaps,
@@ -35,13 +37,15 @@ class MappedReadProfile:
 
 class CombinedReadProfiles:
     def __init__(self, read_intron_profile, read_exon_profile, read_split_exon_profile,
-                 polya_info=None, cage_hits=-1, alignment=None):
+                 polya_info=None, cage_hits=-1, unique_imputation=True, alignment=None):
         self.read_intron_profile = read_intron_profile
         self.read_exon_profile = read_exon_profile
         self.read_split_exon_profile = read_split_exon_profile
         self.alignment = alignment
         self.polya_info = polya_info
         self.cage_hits = cage_hits
+        # BaseCode mode: False if the deletion-block exon imputation was ambiguous (read should be skipped)
+        self.unique_imputation = unique_imputation
 
 
 # The following 2 classes are very similar, but lets keep them separately for now
@@ -244,12 +248,150 @@ class NonOverlappingFeaturesProfileConstructor:
         return MappedReadProfile(exon_profile, read_profile, read_exons, (start_pos, end_pos + 1))
 
 
+# BaseCode mode: imputes exon intervals across unsequenced inner-mate gaps (CIGAR D-blocks)
+# that are not real deletions. Each gap is matched against annotated introns: a gap that contains
+# an annotated intron is split into exon/intron structure; a gap with no intron is filled in as
+# contiguous exon (up to max_gap bp), otherwise the read is flagged as non-unique and skipped.
+class ExonImputation:
+    def __init__(self, known_features, gene_region,
+                 comparator=contains,
+                 overlap=overlaps,
+                 delta=0,
+                 max_gap=550):
+        self.known_features = known_features
+        self.gene_region = gene_region
+        self.comparator = comparator
+        self.overlap = overlap
+        self.delta = delta
+        self.max_gap = max_gap
+
+    def overlaps(self, range1, range2):
+        return not (range1[1] < range2[0] or range1[0] > range2[1])
+
+    def invert_introns(self, matches):
+        new_end = matches[0][0] - 1
+        new_start = matches[-1][1] + 1
+        tmp_new_blocks = []
+        for i in range(len(matches)-1):
+            tmp_new_blocks.append((matches[i][1]+1, matches[i+1][0]-1))
+        return new_end, tmp_new_blocks, new_start
+
+    def prune_exons_outside_gene_model(self, sorted_blocks, sorted_deleted_blocks):
+        prune_left = 0
+        prune_right = 0
+        n_blocks = len(sorted_blocks)
+        n_blocks_deleted = len(sorted_deleted_blocks)
+        for i in range(n_blocks-1):
+            if i >= n_blocks_deleted:
+                break
+            current_block_exon = sorted_blocks[i]
+            if not overlaps(current_block_exon, self.gene_region):
+                if current_block_exon[1] == sorted_deleted_blocks[i][0] - 1:
+                    prune_left += 1
+                else:
+                    break
+            else:
+                break
+        for i in range(1, n_blocks):
+            current_block_exon = sorted_blocks[-i]
+            if i >= n_blocks_deleted:
+                break
+            if not self.overlaps(current_block_exon, self.gene_region):
+                if current_block_exon[0] == sorted_deleted_blocks[-i][1] + 1:
+                    prune_right += 1
+                else:
+                    break
+            else:
+                break
+        return sorted_blocks[prune_left:(n_blocks-prune_right)], sorted_deleted_blocks[prune_left:(n_blocks_deleted-prune_right)]
+
+    def impute_exon_structure(self, sorted_blocks, sorted_deleted_blocks):
+        if overlaps((sorted_blocks[0][0], sorted_blocks[-1][1]), self.gene_region):
+            sorted_blocks, sorted_deleted_blocks = self.prune_exons_outside_gene_model(sorted_blocks, sorted_deleted_blocks)
+        if not sorted_deleted_blocks:
+            return sorted_blocks, True
+        new_sorted_blocks = []
+        unique_imputation_final = True
+        exon_pos = 0
+        deletion_pos = 0
+        new_start = None
+        start = -1
+        while exon_pos < len(sorted_blocks) and deletion_pos < len(sorted_deleted_blocks):
+            current_block = sorted_blocks[exon_pos]
+            if new_start == -1 or start == -1:
+                start = current_block[0]
+            deleted_block = sorted_deleted_blocks[deletion_pos]
+            if current_block[0] < deleted_block[0] or (deletion_pos + 1) == len(sorted_deleted_blocks):
+                # The current block is before the next deleted block or there are no more deleted blocks
+                if (current_block[1] + 1) == deleted_block[0]:
+                    # The exon block is followed by a deletion
+                    new_end, tmp_new_blocks, new_start, unique_imputation = self.find_features_in_block(deleted_block, current_block)
+                    if not unique_imputation:
+                        unique_imputation_final = False
+                    if new_start is not None:
+                        new_sorted_blocks.append((start, new_end))
+                        new_sorted_blocks.extend(tmp_new_blocks)
+                        start = new_start
+                        ref_added = sum([interval_len(block) for block in tmp_new_blocks])
+                    else:
+                        ref_added = interval_len(deleted_block)
+                    if ref_added > self.max_gap:
+                        unique_imputation_final = False
+                else:
+                    # The exon block is followed by a refskip or is the last block
+                    end = current_block[1]
+                    new_sorted_blocks.append((start, end))
+                    new_start = -1
+                exon_pos += 1
+            else:
+                # The current block is after the next deleted block
+                deletion_pos += 1
+        return new_sorted_blocks, unique_imputation_final
+
+    def find_features_in_block(self, deleted_block, current_block):
+        unique_imputation = True
+        matches = 0
+        match_list = []
+        for gene_pos in range(len(self.known_features)):
+            isoform_feature = self.known_features[gene_pos]
+            if self.comparator(deleted_block, isoform_feature):
+                matches += 1
+                match_list.append(isoform_feature)
+        if matches == 0:
+            for gene_pos in range(len(self.known_features)):
+                isoform_feature = self.known_features[gene_pos]
+                if self.overlap(deleted_block, isoform_feature) and not self.comparator(isoform_feature, deleted_block):
+                    unique_imputation = False
+            # No intron in deleted block
+            new_end = None
+            tmp_new_blocks = []
+            new_start = None
+        elif matches == 1:
+            # One intron found in the deleted block
+            new_end = match_list[0][0] - 1
+            tmp_new_blocks = []
+            new_start = match_list[0][1] + 1
+        else:
+            # Check if there is any overlap between contained introns
+            if any(overlaps(intron1, intron2) for intron1, intron2 in combinations(match_list, 2)):
+                new_end = min([t[0] - 1 for t in match_list])
+                tmp_new_blocks = []
+                new_start = max([t[1] + 1 for t in match_list])
+                unique_imputation = False
+            else:
+                new_end, tmp_new_blocks, new_start = self.invert_introns(match_list)
+        return new_end, tmp_new_blocks, new_start, unique_imputation
+
+
 class CombinedProfileConstructor:
     def __init__(self, gene_info, params):
         self.gene_info = gene_info
         self.params = params
 
         gene_region = (gene_info.start, gene_info.end)
+        self.exon_imputation = ExonImputation(self.gene_info.intron_profiles.features, gene_region,
+                                              comparator=contains, delta=self.params.delta,
+                                              max_gap=getattr(self.params, 'basecode_max_gap', 550))
         self.intron_profile_constructor = \
             OverlappingFeaturesProfileConstructor(self.gene_info.intron_profiles.features, gene_region,
                                                   comparator=partial(equal_ranges, delta=self.params.delta),
@@ -265,7 +407,13 @@ class CombinedProfileConstructor:
                                                                         delta=self.params.minimal_exon_overlap),
                                                      delta=self.params.delta)
 
-    def construct_profiles(self, sorted_blocks, polya_info, cage_hits):
+    def construct_profiles(self, sorted_blocks, sorted_deleted_blocks, polya_info, cage_hits):
+        # BaseCode mode: impute exon structure across unsequenced inner-mate gaps (D-blocks).
+        # Non-BaseCode runs pass no deleted blocks, so this is a no-op and behaves like upstream.
+        unique_imputation = True
+        if getattr(self.params, 'basecode', False) and sorted_deleted_blocks:
+            sorted_blocks, unique_imputation = self.exon_imputation.impute_exon_structure(sorted_blocks,
+                                                                                          sorted_deleted_blocks)
         intron_profile = self.intron_profile_constructor.construct_intron_profile(sorted_blocks,
                                                                                   polya_info.external_polya_pos,
                                                                                   polya_info.external_polyt_pos)
@@ -277,5 +425,5 @@ class CombinedProfileConstructor:
         split_exon_profile = self.split_exon_profile_constructor.construct_profile(sorted_blocks,
                                                                                    polya_info.external_polya_pos,
                                                                                    polya_info.external_polyt_pos)
-        return CombinedReadProfiles(intron_profile, exon_profile, split_exon_profile,
-                                    polya_info=polya_info, cage_hits=cage_hits)
+        return sorted_blocks, unique_imputation, CombinedReadProfiles(intron_profile, exon_profile, split_exon_profile,
+                                    polya_info=polya_info, cage_hits=cage_hits, unique_imputation=unique_imputation)

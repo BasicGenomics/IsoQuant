@@ -444,6 +444,23 @@ class LongReadAssigner:
             return ReadAssignment(read_id, ReadAssignmentType.intergenic, self.string_pools,
                                   match=IsoformMatch(MatchClassification.intergenic, string_pools=self.string_pools))
 
+        if not combined_read_profile.unique_imputation:
+            # BaseCode mode: deletion-block exon imputation was ambiguous; classify the read as
+            # noninformative based on its location relative to the gene. (Defaults True otherwise.)
+            read_region = (read_split_exon_profile.read_features[0][0], read_split_exon_profile.read_features[-1][1])
+            gene_region = (self.gene_info.split_exon_profiles.features[0][0],
+                           self.gene_info.split_exon_profiles.features[-1][1])
+            if not overlaps(read_region, gene_region):
+                assignment = ReadAssignment(read_id, ReadAssignmentType.noninformative, self.string_pools,
+                                            match=IsoformMatch(MatchClassification.intergenic, string_pools=self.string_pools))
+            elif all(el != 1 for el in read_split_exon_profile.gene_profile):
+                assignment = ReadAssignment(read_id, ReadAssignmentType.noninformative, self.string_pools,
+                                            match=IsoformMatch(MatchClassification.genic_intron, string_pools=self.string_pools))
+            else:
+                assignment = ReadAssignment(read_id, ReadAssignmentType.noninformative, self.string_pools,
+                                            match=IsoformMatch(MatchClassification.genic, string_pools=self.string_pools))
+            return assignment
+
         if all(el != 1 for el in read_split_exon_profile.read_profile) \
                 or all(el == 0 or el == -2 for el in read_split_exon_profile.gene_profile):
             read_region = (read_split_exon_profile.read_features[0][0], read_split_exon_profile.read_features[-1][1])
