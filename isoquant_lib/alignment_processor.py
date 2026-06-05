@@ -366,7 +366,7 @@ class AlignmentCollector:
                 continue
 
             read_id = alignment.query_name
-            alignment_info = AlignmentInfo(alignment)
+            alignment_info = AlignmentInfo(alignment, self.params)
 
             if not alignment_info.read_exons:
                 logger.warning("Read %s has no aligned exons" % read_id)
@@ -393,7 +393,9 @@ class AlignmentCollector:
             read_assignment.cage_found = len(alignment_info.cage_hits) > 0
             read_assignment.genomic_region = region
             read_assignment.exons = alignment_info.read_exons
-            read_assignment.corrected_exons = corrector.correct_read(alignment_info)
+            # BaseCode mode: skip exon correction (the imputed exons are authoritative); see --basecode.
+            read_assignment.corrected_exons = (
+                read_assignment.exons if self.params.basecode else corrector.correct_read(alignment_info))
             read_assignment.corrected_introns = junctions_from_blocks(read_assignment.corrected_exons)
 
             # Populate barcode and UMI first (needed by some groupers)
@@ -444,7 +446,7 @@ class AlignmentCollector:
 
             read_id = alignment.query_name
             logger.debug("=== Processing read " + read_id + " ===")
-            alignment_info = AlignmentInfo(alignment)
+            alignment_info = AlignmentInfo(alignment, self.params)
 
             if not alignment_info.read_exons:
                 logger.warning("Read %s has no aligned exons" % read_id)
@@ -454,6 +456,9 @@ class AlignmentCollector:
             # if self.params.cage:
             #    alignment_info.add_cage_info(self.cage_finder)
             alignment_info.construct_profiles(profile_constructor)
+            if self.params.basecode and not alignment_info.unique_imputation:
+                # BaseCode mode: skip reads whose deletion-block exon imputation was ambiguous
+                continue
             read_assignment = assigner.assign_to_isoform(read_id, alignment_info.combined_profile)
 
             if (not read_assignment.assignment_type in [ReadAssignmentType.unique,
@@ -469,8 +474,10 @@ class AlignmentCollector:
             read_assignment.cage_found = len(alignment_info.cage_hits) > 0
             read_assignment.genomic_region = region
             read_assignment.exons = alignment_info.read_exons
-            read_assignment.corrected_exons = exon_corrector.correct_assigned_read(alignment_info,
-                                                                                   read_assignment)
+            # BaseCode mode: skip exon correction (the imputed exons are authoritative); see --basecode.
+            read_assignment.corrected_exons = (
+                read_assignment.exons if self.params.basecode
+                else exon_corrector.correct_assigned_read(alignment_info, read_assignment))
             read_assignment.corrected_introns = junctions_from_blocks(read_assignment.corrected_exons)
 
             # Populate barcode and UMI first (needed by some groupers)
