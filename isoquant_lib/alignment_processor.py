@@ -395,7 +395,8 @@ class AlignmentCollector:
             read_assignment.exons = alignment_info.read_exons
             # BaseCode mode: skip exon correction (the imputed exons are authoritative); see --basecode.
             read_assignment.corrected_exons = (
-                read_assignment.exons if self.params.basecode else corrector.correct_read(alignment_info))
+                read_assignment.exons if (self.params.basecode and not getattr(self.params, 'basecode_correct', False))
+                else corrector.correct_read(alignment_info))
             read_assignment.corrected_introns = junctions_from_blocks(read_assignment.corrected_exons)
 
             # Populate barcode and UMI first (needed by some groupers)
@@ -476,7 +477,7 @@ class AlignmentCollector:
             read_assignment.exons = alignment_info.read_exons
             # BaseCode mode: skip exon correction (the imputed exons are authoritative); see --basecode.
             read_assignment.corrected_exons = (
-                read_assignment.exons if self.params.basecode
+                read_assignment.exons if (self.params.basecode and not getattr(self.params, 'basecode_correct', False))
                 else exon_corrector.correct_assigned_read(alignment_info, read_assignment))
             read_assignment.corrected_introns = junctions_from_blocks(read_assignment.corrected_exons)
 

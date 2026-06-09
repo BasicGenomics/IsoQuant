@@ -244,6 +244,9 @@ def parse_args(cmd_args=None, namespace=None):
                                    help="BaseCode mode: maximum unsequenced exonic gap (bp) to impute as "
                                         "contiguous exon when no annotated intron matches; larger gaps cause "
                                         "the molecule to be skipped (default: 550)")
+    add_additional_option_to_group(algo_args_group, "--basecode_correct", action='store_true', default=False,
+                                   help="BaseCode mode: also run the exon corrector (default: off; for "
+                                        "comparison/experiments only)")
 
 
     # PIPELINE STEPS

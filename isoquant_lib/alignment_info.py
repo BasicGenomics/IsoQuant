@@ -19,7 +19,7 @@ class AlignmentInfo:
 
     def __init__(self, alignment, params=None):
         self.alignment = alignment
-        # BaseCode mode splits read blocks on CIGAR deletions and records the gaps (del_blocks) for
+        # BaseCode mode: splits read blocks on CIGAR deletions and records the gaps (del_blocks) for
         # exon imputation; otherwise behaves like upstream (deletions absorbed, del_blocks empty).
         split_on_deletion = bool(params is not None and getattr(params, 'basecode', False))
         self.read_exons, self.del_blocks, self.read_blocks, self.cigar_blocks = \

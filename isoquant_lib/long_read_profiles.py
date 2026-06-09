@@ -63,11 +63,17 @@ class OverlappingFeaturesProfileConstructor:
         self.delta = delta
 
     def construct_intron_profile(self, sorted_blocks, polya_position=-1, polyt_position=-1):
+        # BaseCode mode: imputation can yield an empty block list; guard against it (from old fork)
+        if not sorted_blocks:
+            return MappedReadProfile([], [], defaultdict(list), (0, 0))
         mapped_region = (sorted_blocks[0][0], sorted_blocks[-1][1])
         read_introns = junctions_from_blocks(sorted_blocks)
         return self.construct_profile_for_features(read_introns, mapped_region, polya_position, polyt_position)
 
     def construct_exon_profile(self, sorted_blocks, polya_position=-1, polyt_position=-1):
+        # BaseCode mode: guard against an empty block list (from old fork)
+        if not sorted_blocks:
+            return MappedReadProfile([], [], defaultdict(list), (0, 0))
         mapped_region = (sorted_blocks[0][1] + self.delta, sorted_blocks[-1][0] - self.delta)
         return self.construct_profile_for_features(sorted_blocks, mapped_region, polya_position, polyt_position)
 
@@ -196,6 +202,9 @@ class NonOverlappingFeaturesProfileConstructor:
         self.delta = delta
 
     def construct_profile(self, sorted_blocks, polya_position=-1, polyt_position=-1):
+        # BaseCode mode: guard against an empty block list (from old fork)
+        if not sorted_blocks:
+            return MappedReadProfile([], [], defaultdict(list), (0, 0))
         exon_profile = [0] * (len(self.known_exons))
         read_profile = [0] * (len(sorted_blocks))
         read_exons = sorted_blocks
@@ -414,6 +423,10 @@ class CombinedProfileConstructor:
         if getattr(self.params, 'basecode', False) and sorted_deleted_blocks:
             sorted_blocks, unique_imputation = self.exon_imputation.impute_exon_structure(sorted_blocks,
                                                                                           sorted_deleted_blocks)
+            if not sorted_blocks:
+                # imputation yielded no usable blocks -> read is unassignable; mark non-unique so it
+                # is skipped in the read loop (and never reaches the assigner with empty read_features)
+                unique_imputation = False
         intron_profile = self.intron_profile_constructor.construct_intron_profile(sorted_blocks,
                                                                                   polya_info.external_polya_pos,
                                                                                   polya_info.external_polyt_pos)
