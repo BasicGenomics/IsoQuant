@@ -458,8 +458,11 @@ class AlignmentCollector:
             #    alignment_info.add_cage_info(self.cage_finder)
             alignment_info.construct_profiles(profile_constructor)
             if self.params.basecode and not alignment_info.unique_imputation:
-                # BaseCode mode: skip reads whose deletion-block exon imputation was ambiguous
-                continue
+                # BaseCode mode: skip reads whose deletion-block exon imputation was ambiguous.
+                # With --basecode_keep_nonunique, keep them instead — but still drop ones that
+                # imputed to no exons, since those would crash the assigner (read_features[0]).
+                if not getattr(self.params, 'basecode_keep_nonunique', False) or not alignment_info.read_exons:
+                    continue
             read_assignment = assigner.assign_to_isoform(read_id, alignment_info.combined_profile)
 
             if (not read_assignment.assignment_type in [ReadAssignmentType.unique,

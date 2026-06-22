@@ -444,9 +444,10 @@ class LongReadAssigner:
             return ReadAssignment(read_id, ReadAssignmentType.intergenic, self.string_pools,
                                   match=IsoformMatch(MatchClassification.intergenic, string_pools=self.string_pools))
 
-        if not combined_read_profile.unique_imputation:
+        if not combined_read_profile.unique_imputation and not getattr(self.params, 'basecode_keep_nonunique', False):
             # BaseCode mode: deletion-block exon imputation was ambiguous; classify the read as
             # noninformative based on its location relative to the gene. (Defaults True otherwise.)
+            # With --basecode_keep_nonunique, fall through to normal assignment instead.
             read_region = (read_split_exon_profile.read_features[0][0], read_split_exon_profile.read_features[-1][1])
             gene_region = (self.gene_info.split_exon_profiles.features[0][0],
                            self.gene_info.split_exon_profiles.features[-1][1])
