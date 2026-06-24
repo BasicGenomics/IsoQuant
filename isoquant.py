@@ -238,8 +238,8 @@ def parse_args(cmd_args=None, namespace=None):
                                         "when file_name grouping is used (default: true)")
     add_option_to_group(algo_args_group, "--basecode", action='store_true', default=False,
                         help="enable BaseCode mode: impute exon structure across unsequenced inner-mate gaps "
-                             "(CIGAR D-blocks) and disable exon correction; for reconstructed-molecule data "
-                             "(e.g. BASIC Genomics). Without this flag behavior is identical to upstream.")
+                             "(CIGAR D-blocks) and disable exon correction; for reconstructed-molecule data."
+                             "Without this flag behavior is identical to upstream.")
     add_additional_option_to_group(algo_args_group, "--basecode_max_gap", type=int, default=550,
                                    help="BaseCode mode: maximum unsequenced exonic gap (bp) to impute as "
                                         "contiguous exon when no annotated intron matches; larger gaps cause "
@@ -251,6 +251,11 @@ def parse_args(cmd_args=None, namespace=None):
                                    help="BaseCode mode: keep reads whose deletion-block exon imputation was "
                                         "non-unique instead of skipping them (default: off; experimental). "
                                         "Reads that impute to no exons are still dropped.")
+    add_additional_option_to_group(algo_args_group, "--basecode_no_context_resolve", action='store_true', default=False,
+                                   help="BaseCode mode: disable context-constrained imputation. By default, when a "
+                                        "gap cannot be filled uniquely gene-wide, the read's sequenced introns are "
+                                        "used to narrow to compatible isoforms and resolve the gap from those. This "
+                                        "flag reverts to gene-wide-only imputation.")
 
 
     # PIPELINE STEPS

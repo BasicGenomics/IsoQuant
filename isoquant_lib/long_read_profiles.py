@@ -266,13 +266,17 @@ class ExonImputation:
                  comparator=contains,
                  overlap=overlaps,
                  delta=0,
-                 max_gap=550):
+                 max_gap=550,
+                 all_isoforms_introns=None,
+                 context_resolve=True):
         self.known_features = known_features
         self.gene_region = gene_region
         self.comparator = comparator
         self.overlap = overlap
         self.delta = delta
         self.max_gap = max_gap
+        self.all_isoforms_introns = all_isoforms_introns or {}
+        self.context_resolve = context_resolve
 
     def overlaps(self, range1, range2):
         return not (range1[1] < range2[0] or range1[0] > range2[1])
@@ -314,7 +318,7 @@ class ExonImputation:
                 break
         return sorted_blocks[prune_left:(n_blocks-prune_right)], sorted_deleted_blocks[prune_left:(n_blocks_deleted-prune_right)]
 
-    def impute_exon_structure(self, sorted_blocks, sorted_deleted_blocks):
+    def impute_exon_structure(self, sorted_blocks, sorted_deleted_blocks, observed_introns=None):
         if overlaps((sorted_blocks[0][0], sorted_blocks[-1][1]), self.gene_region):
             sorted_blocks, sorted_deleted_blocks = self.prune_exons_outside_gene_model(sorted_blocks, sorted_deleted_blocks)
         if not sorted_deleted_blocks:
@@ -325,6 +329,8 @@ class ExonImputation:
         deletion_pos = 0
         new_start = None
         start = -1
+        restricted_features = None       # context-constrained candidate introns (computed lazily)
+        restricted_computed = False
         while exon_pos < len(sorted_blocks) and deletion_pos < len(sorted_deleted_blocks):
             current_block = sorted_blocks[exon_pos]
             if new_start == -1 or start == -1:
@@ -335,6 +341,17 @@ class ExonImputation:
                 if (current_block[1] + 1) == deleted_block[0]:
                     # The exon block is followed by a deletion
                     new_end, tmp_new_blocks, new_start, unique_imputation = self.find_features_in_block(deleted_block, current_block)
+                    if not unique_imputation and self.context_resolve and observed_introns:
+                        # Gene-wide fill was ambiguous: narrow to introns of isoforms compatible with
+                        # the read's sequenced introns and retry the fill from that restricted set.
+                        if not restricted_computed:
+                            restricted_features = self.context_restricted_introns(observed_introns)
+                            restricted_computed = True
+                        if restricted_features:
+                            r_end, r_blocks, r_start, r_unique = self.find_features_in_block(
+                                deleted_block, current_block, features=restricted_features)
+                            if r_unique:
+                                new_end, tmp_new_blocks, new_start, unique_imputation = r_end, r_blocks, r_start, r_unique
                     if not unique_imputation:
                         unique_imputation_final = False
                     if new_start is not None:
@@ -357,18 +374,18 @@ class ExonImputation:
                 deletion_pos += 1
         return new_sorted_blocks, unique_imputation_final
 
-    def find_features_in_block(self, deleted_block, current_block):
+    def find_features_in_block(self, deleted_block, current_block, features=None):
+        if features is None:
+            features = self.known_features
         unique_imputation = True
         matches = 0
         match_list = []
-        for gene_pos in range(len(self.known_features)):
-            isoform_feature = self.known_features[gene_pos]
+        for isoform_feature in features:
             if self.comparator(deleted_block, isoform_feature):
                 matches += 1
                 match_list.append(isoform_feature)
         if matches == 0:
-            for gene_pos in range(len(self.known_features)):
-                isoform_feature = self.known_features[gene_pos]
+            for isoform_feature in features:
                 if self.overlap(deleted_block, isoform_feature) and not self.comparator(isoform_feature, deleted_block):
                     unique_imputation = False
             # No intron in deleted block
@@ -391,6 +408,22 @@ class ExonImputation:
                 new_end, tmp_new_blocks, new_start = self.invert_introns(match_list)
         return new_end, tmp_new_blocks, new_start, unique_imputation
 
+    def context_restricted_introns(self, observed_introns):
+        # Context-constrained imputation: find isoforms whose intron chain contains ALL of the read's
+        # sequenced (observed) introns, and return the sorted union of those isoforms' introns -- the
+        # candidate set to fill the gap from. Returns None if nothing is compatible (e.g. no observed
+        # introns to constrain on), so the caller falls back to the gene-wide result.
+        compatible = []
+        for introns in self.all_isoforms_introns.values():
+            if all(any(equal_ranges(oi, ii, self.delta) for ii in introns) for oi in observed_introns):
+                compatible.append(introns)
+        if not compatible:
+            return None
+        restricted = set()
+        for introns in compatible:
+            restricted.update(introns)
+        return sorted(restricted)
+
 
 class CombinedProfileConstructor:
     def __init__(self, gene_info, params):
@@ -400,7 +433,9 @@ class CombinedProfileConstructor:
         gene_region = (gene_info.start, gene_info.end)
         self.exon_imputation = ExonImputation(self.gene_info.intron_profiles.features, gene_region,
                                               comparator=contains, delta=self.params.delta,
-                                              max_gap=getattr(self.params, 'basecode_max_gap', 550))
+                                              max_gap=getattr(self.params, 'basecode_max_gap', 550),
+                                              all_isoforms_introns=getattr(self.gene_info, 'all_isoforms_introns', None),
+                                              context_resolve=not getattr(self.params, 'basecode_no_context_resolve', False))
         self.intron_profile_constructor = \
             OverlappingFeaturesProfileConstructor(self.gene_info.intron_profiles.features, gene_region,
                                                   comparator=partial(equal_ranges, delta=self.params.delta),
@@ -421,8 +456,12 @@ class CombinedProfileConstructor:
         # Non-BaseCode runs pass no deleted blocks, so this is a no-op and behaves like upstream.
         unique_imputation = True
         if getattr(self.params, 'basecode', False) and sorted_deleted_blocks:
-            sorted_blocks, unique_imputation = self.exon_imputation.impute_exon_structure(sorted_blocks,
-                                                                                          sorted_deleted_blocks)
+            observed_introns = None
+            if self.exon_imputation.context_resolve:
+                deleted_set = set(sorted_deleted_blocks)
+                observed_introns = [j for j in junctions_from_blocks(sorted_blocks) if j not in deleted_set]
+            sorted_blocks, unique_imputation = self.exon_imputation.impute_exon_structure(
+                sorted_blocks, sorted_deleted_blocks, observed_introns=observed_introns)
             if not sorted_blocks:
                 # imputation yielded no usable blocks -> read is unassignable; mark non-unique so it
                 # is skipped in the read loop (and never reaches the assigner with empty read_features)
