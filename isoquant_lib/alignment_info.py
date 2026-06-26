@@ -41,6 +41,9 @@ class AlignmentInfo:
         # BaseCode mode: imputation may rewrite read_exons and set unique_imputation; del_blocks consumed here.
         self.read_exons, self.unique_imputation, self.combined_profile = \
             profile_constructor.construct_profiles(self.read_exons, self.del_blocks, self.polya_info, self.cage_hits)
+        # BaseCode: keep the raw alignment on the profile so the assigner can read per-read tags
+        # (TC/FC for full-length detection in --basecode_end_resolve).
+        self.combined_profile.alignment = self.alignment
         self.del_blocks = []
 
     def set_aligned_pairs(self):

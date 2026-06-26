@@ -256,6 +256,11 @@ def parse_args(cmd_args=None, namespace=None):
                                         "gap cannot be filled uniquely gene-wide, the read's sequenced introns are "
                                         "used to narrow to compatible isoforms and resolve the gap from those. This "
                                         "flag reverts to gene-wide-only imputation.")
+    add_additional_option_to_group(algo_args_group, "--basecode_end_resolve", action='store_true', default=False,
+                                   help="BaseCode mode: for full-length molecules (TC>0 & FC>0) that still match "
+                                        "several isoforms, keep only exact full-splice matches and drop the longer "
+                                        "isoforms the molecule is merely nested in (containment). Uses the validated "
+                                        "molecule ends to break end-containment ambiguity (default: off; experimental).")
 
 
     # PIPELINE STEPS

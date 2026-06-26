@@ -550,6 +550,16 @@ class LongReadAssigner:
 
         return assignment
 
+    def _read_is_full_length(self, combined_read_profile):
+        # BaseCode full-length molecule: both ends captured (TC>0 & FC>0, i.e. the CP tag set upstream).
+        aln = combined_read_profile.alignment
+        if aln is None:
+            return False
+        try:
+            return aln.get_tag("TC") > 0 and aln.get_tag("FC") > 0
+        except KeyError:
+            return False
+
     def match_consistent_spliced(self, read_id, combined_read_profile, consistent_isoforms):
         isoform_split_exon_profiles = self.gene_info.split_exon_profiles.profiles
         matched_isoforms = consistent_isoforms
@@ -570,6 +580,15 @@ class LongReadAssigner:
                 matched_isoforms = \
                     self.resolve_by_nucleotide_score(combined_read_profile, matched_isoforms,
                                                      similarity_function=self.jaccard_based_nucleotide_score)
+
+            # BaseCode: a validated full-length molecule (TC>0 & FC>0) cannot be a truncated copy of a
+            # longer isoform, so when it still matches several isoforms keep only the exact full-splice
+            # matches and drop the longer isoforms it is merely nested in (end-containment).
+            if getattr(self.params, "basecode_end_resolve", False) and len(matched_isoforms) > 1 \
+                    and self._read_is_full_length(combined_read_profile):
+                fsm_isoforms = [i for i in matched_isoforms if self.is_fsm(read_region, i)]
+                if 0 < len(fsm_isoforms) < len(matched_isoforms):
+                    matched_isoforms = fsm_isoforms
 
         read_assignment = None
         if len(matched_isoforms) == 1:
