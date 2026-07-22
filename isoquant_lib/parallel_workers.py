@@ -194,6 +194,11 @@ def collect_reads_in_parallel(sample, chr_id, chr_ids, args, processed_read_mana
         string_pools.save_barcode_umi_pools(sample.get_barcode_pools_file(chr_id))
 
     processed_reads_manager.finalize(chr_id)
+    if getattr(args, 'basecode', False) and alignment_collector.basecode_nonunique:
+        kept = alignment_collector.basecode_nonunique - alignment_collector.basecode_dropped
+        logger.info("BaseCode %s: %d reads with non-unique D-gap imputation (%d dropped, %d kept)"
+                    % (chr_id, alignment_collector.basecode_nonunique,
+                       alignment_collector.basecode_dropped, kept))
     logger.info("Finished processing chromosome " + chr_id)
     open(lock_file, "w").close()
 

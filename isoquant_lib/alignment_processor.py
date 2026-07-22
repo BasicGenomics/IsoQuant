@@ -271,6 +271,10 @@ class AlignmentCollector:
         self.polya_fixer = PolyAFixer(self.params)
         # self.cage_finder = CagePeakFinder(params.cage, params.cage_shift)
         self.alignment_stat_counter = EnumStats()
+        # BaseCode: track reads whose D-gap exon imputation was non-unique, and how many of
+        # those were dropped (vs kept via --basecode_keep_nonunique). Reported per chromosome.
+        self.basecode_nonunique = 0
+        self.basecode_dropped = 0
 
     def process(self):
         alignment_storage = BAMAlignmentStorage(self.bam_merger) if not self.params.high_memory else InMemoryAlignmentStorage()
@@ -461,7 +465,9 @@ class AlignmentCollector:
                 # BaseCode mode: skip reads whose deletion-block exon imputation was ambiguous.
                 # With --basecode_keep_nonunique, keep them instead — but still drop ones that
                 # imputed to no exons, since those would crash the assigner (read_features[0]).
+                self.basecode_nonunique += 1
                 if not getattr(self.params, 'basecode_keep_nonunique', False) or not alignment_info.read_exons:
+                    self.basecode_dropped += 1
                     continue
             read_assignment = assigner.assign_to_isoform(read_id, alignment_info.combined_profile)
 
