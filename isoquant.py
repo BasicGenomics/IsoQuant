@@ -261,6 +261,12 @@ def parse_args(cmd_args=None, namespace=None):
                                         "several isoforms, keep only exact full-splice matches and drop the longer "
                                         "isoforms the molecule is merely nested in (containment). Uses the validated "
                                         "molecule ends to break end-containment ambiguity (default: off; experimental).")
+    add_additional_option_to_group(algo_args_group, "--basecode_intron_resolve", action='store_true', default=False,
+                                   help="BaseCode mode: when a read is consistent with several isoforms, resolve to the "
+                                        "isoform(s) whose INTRON CHAIN matches the read most exactly, ignoring "
+                                        "terminal/UTR differences. Fixes end/3'-truncated reads that get pulled to a "
+                                        "near-duplicate isoform via a coincidental TSS/polyA match even though their "
+                                        "splice chain uniquely identifies another isoform (default: off; experimental).")
 
 
     # PIPELINE STEPS

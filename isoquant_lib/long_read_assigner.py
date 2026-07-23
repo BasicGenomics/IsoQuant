@@ -562,6 +562,28 @@ class LongReadAssigner:
 
     def match_consistent_spliced(self, read_id, combined_read_profile, consistent_isoforms):
         isoform_split_exon_profiles = self.gene_info.split_exon_profiles.profiles
+
+        # BaseCode intron-chain resolve: applied FIRST, before the exon-overlap / nucleotide-score
+        # resolution below (which is biased by UTR coverage and would drop the exact intron match for
+        # a 3'/5'-truncated read). Uses EXACT intron coordinates (delta-independent), so a small
+        # splice-site shift stays visible even at large matching delta. It fires ONLY when at least
+        # one isoform's chain contains every read intron EXACTLY (0 mismatches): then the isoforms
+        # that are NOT exact are dropped and only the exact one(s) kept. If no isoform is exact, or
+        # several are exact (read can't tell them apart — e.g. differ only in UTR/terminal-exon
+        # length), it does nothing and the normal delta-tolerant resolution below takes over.
+        if getattr(self.params, "basecode_intron_resolve", False) and len(consistent_isoforms) > 1:
+            read_introns = [tuple(i) for i in combined_read_profile.read_intron_profile.read_features]
+            if read_introns:
+                def _intron_mismatch(isoform_id):
+                    iso_introns = set(map(tuple, self.gene_info.all_isoforms_introns.get(isoform_id, [])))
+                    return sum(1 for ri in read_introns if ri not in iso_introns)
+                scored = [(iso, _intron_mismatch(iso)) for iso in consistent_isoforms]
+                exact = [iso for iso, mm in scored if mm == 0]
+                # only intervene when there is an exact intron-chain match AND at least one non-exact
+                # isoform to drop; ties between several exact isoforms are left to the delta step
+                if 0 < len(exact) < len(consistent_isoforms):
+                    consistent_isoforms = exact
+
         matched_isoforms = consistent_isoforms
         if len(consistent_isoforms) > 1:
             exon_matched_isoforms = \
