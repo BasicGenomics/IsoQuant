@@ -247,7 +247,7 @@ def parse_args(cmd_args=None, namespace=None):
     add_additional_option_to_group(algo_args_group, "--basecode_correct", action='store_true', default=False,
                                    help="BaseCode mode: also run the exon corrector (default: off; for "
                                         "comparison/experiments only)")
-    add_additional_option_to_group(algo_args_group, "--basecode_keep_nonunique", action='store_true', default=False,
+    add_additional_option_to_group(algo_args_group, "--basecode_keep_ambiguous_imputation", action='store_true', default=False,
                                    help="BaseCode mode: keep reads whose deletion-block exon imputation was "
                                         "non-unique instead of skipping them (default: off; experimental). "
                                         "Reads that impute to no exons are still dropped.")

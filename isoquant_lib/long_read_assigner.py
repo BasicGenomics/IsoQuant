@@ -444,10 +444,10 @@ class LongReadAssigner:
             return ReadAssignment(read_id, ReadAssignmentType.intergenic, self.string_pools,
                                   match=IsoformMatch(MatchClassification.intergenic, string_pools=self.string_pools))
 
-        if not combined_read_profile.unique_imputation and not getattr(self.params, 'basecode_keep_nonunique', False):
+        if not combined_read_profile.unique_imputation and not getattr(self.params, 'basecode_keep_ambiguous_imputation', False):
             # BaseCode mode: deletion-block exon imputation was ambiguous; classify the read as
             # noninformative based on its location relative to the gene. (Defaults True otherwise.)
-            # With --basecode_keep_nonunique, fall through to normal assignment instead.
+            # With --basecode_keep_ambiguous_imputation, fall through to normal assignment instead.
             read_region = (read_split_exon_profile.read_features[0][0], read_split_exon_profile.read_features[-1][1])
             gene_region = (self.gene_info.split_exon_profiles.features[0][0],
                            self.gene_info.split_exon_profiles.features[-1][1])
@@ -506,6 +506,28 @@ class LongReadAssigner:
 
         return assignment
 
+    def _unique_exact_intron_subchain(self, combined_read_profile):
+        """Return the single isoform whose intron chain contains the read's introns as an EXACT,
+        contiguous sub-chain (5'/3' truncation allowed), else None if zero or more than one qualify.
+        Exact coordinates (delta-independent) and contiguous (no skipped intron within the read's
+        span), so it only fires when the read's splicing uniquely identifies one isoform."""
+        read_introns = [tuple(i) for i in combined_read_profile.read_intron_profile.read_features]
+        if not read_introns:
+            return None
+        n = len(read_introns)
+        hits = []
+        for isoform_id, introns in self.gene_info.all_isoforms_introns.items():
+            it = [tuple(x) for x in introns]
+            if len(it) < n:
+                continue
+            for j in range(len(it) - n + 1):
+                if it[j:j + n] == read_introns:
+                    hits.append(isoform_id)
+                    break
+            if len(hits) > 1:
+                return None
+        return hits[0] if len(hits) == 1 else None
+
     def match_consistent(self, read_id, combined_read_profile):
         """ match profile when all read features are assigned and read has at least one intron
 
@@ -563,26 +585,16 @@ class LongReadAssigner:
     def match_consistent_spliced(self, read_id, combined_read_profile, consistent_isoforms):
         isoform_split_exon_profiles = self.gene_info.split_exon_profiles.profiles
 
-        # BaseCode intron-chain resolve: applied FIRST, before the exon-overlap / nucleotide-score
-        # resolution below (which is biased by UTR coverage and would drop the exact intron match for
-        # a 3'/5'-truncated read). Uses EXACT intron coordinates (delta-independent), so a small
-        # splice-site shift stays visible even at large matching delta. It fires ONLY when at least
-        # one isoform's chain contains every read intron EXACTLY (0 mismatches): then the isoforms
-        # that are NOT exact are dropped and only the exact one(s) kept. If no isoform is exact, or
-        # several are exact (read can't tell them apart — e.g. differ only in UTR/terminal-exon
-        # length), it does nothing and the normal delta-tolerant resolution below takes over.
+        # BaseCode intron-chain resolve: a 3'-truncated ISM can reach here CONSISTENT with several
+        # isoforms. Before the UTR/coverage/polyA resolution below can drop the isoform whose introns
+        # the read matches EXACTLY in favour of near-duplicates it matches only via intron_shift,
+        # narrow to the isoform whose chain the read is an exact contiguous sub-chain of — if exactly
+        # one, and it is among the consistent set. The normal classification below then runs against
+        # it (proper unique / unique_minor_difference + full events).
         if getattr(self.params, "basecode_intron_resolve", False) and len(consistent_isoforms) > 1:
-            read_introns = [tuple(i) for i in combined_read_profile.read_intron_profile.read_features]
-            if read_introns:
-                def _intron_mismatch(isoform_id):
-                    iso_introns = set(map(tuple, self.gene_info.all_isoforms_introns.get(isoform_id, [])))
-                    return sum(1 for ri in read_introns if ri not in iso_introns)
-                scored = [(iso, _intron_mismatch(iso)) for iso in consistent_isoforms]
-                exact = [iso for iso, mm in scored if mm == 0]
-                # only intervene when there is an exact intron-chain match AND at least one non-exact
-                # isoform to drop; ties between several exact isoforms are left to the delta step
-                if 0 < len(exact) < len(consistent_isoforms):
-                    consistent_isoforms = exact
+            rescued = self._unique_exact_intron_subchain(combined_read_profile)
+            if rescued is not None and rescued in set(consistent_isoforms):
+                consistent_isoforms = [rescued]
 
         matched_isoforms = consistent_isoforms
         if len(consistent_isoforms) > 1:
@@ -857,6 +869,7 @@ class LongReadAssigner:
 
     # ==== POLYA STUFF ====
     def verify_read_ends_for_assignment(self, combined_read_profile, assignment):
+        prev_type = assignment.assignment_type
         match_dict = {}
         for match in assignment.isoform_matches:
             if match.assigned_transcript is None:
@@ -866,7 +879,19 @@ class LongReadAssigner:
                                                      match.match_subclassifications)
             match_dict[match.assigned_transcript] = match.match_subclassifications
 
-        assignment.assignment_type = self.classify_assignment(match_dict.keys(), match_dict)
+        new_type = self.classify_assignment(match_dict.keys(), match_dict)
+        # BaseCode intron-chain resolve, part 2: do not let a 3'-end / UTR polyA difference DEMOTE a
+        # read that exactly matches an isoform's intron chain. The read stays on that isoform with its
+        # consistent type; the polyA event is RETAINED in the match (a flag for downstream QC — e.g. a
+        # 3'-truncated / internally-primed molecule of a long-UTR isoform) rather than turning the read
+        # inconsistent and re-routing it onto a near-duplicate. Policy: trust splicing over the 3' end.
+        if getattr(self.params, "basecode_intron_resolve", False) and new_type.is_inconsistent() \
+                and prev_type in (ReadAssignmentType.unique, ReadAssignmentType.unique_minor_difference) \
+                and len(match_dict) == 1 \
+                and self._unique_exact_intron_subchain(combined_read_profile) in match_dict:
+            assignment.assignment_type = prev_type
+        else:
+            assignment.assignment_type = new_type
 
 
 

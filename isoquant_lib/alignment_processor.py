@@ -272,7 +272,7 @@ class AlignmentCollector:
         # self.cage_finder = CagePeakFinder(params.cage, params.cage_shift)
         self.alignment_stat_counter = EnumStats()
         # BaseCode: track reads whose D-gap exon imputation was non-unique, and how many of
-        # those were dropped (vs kept via --basecode_keep_nonunique). Reported per chromosome.
+        # those were dropped (vs kept via --basecode_keep_ambiguous_imputation). Reported per chromosome.
         self.basecode_nonunique = 0
         self.basecode_dropped = 0
 
@@ -463,10 +463,10 @@ class AlignmentCollector:
             alignment_info.construct_profiles(profile_constructor)
             if self.params.basecode and not alignment_info.unique_imputation:
                 # BaseCode mode: skip reads whose deletion-block exon imputation was ambiguous.
-                # With --basecode_keep_nonunique, keep them instead — but still drop ones that
+                # With --basecode_keep_ambiguous_imputation, keep them instead — but still drop ones that
                 # imputed to no exons, since those would crash the assigner (read_features[0]).
                 self.basecode_nonunique += 1
-                if not getattr(self.params, 'basecode_keep_nonunique', False) or not alignment_info.read_exons:
+                if not getattr(self.params, 'basecode_keep_ambiguous_imputation', False) or not alignment_info.read_exons:
                     self.basecode_dropped += 1
                     continue
             read_assignment = assigner.assign_to_isoform(read_id, alignment_info.combined_profile)
